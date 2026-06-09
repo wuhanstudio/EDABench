@@ -20,7 +20,8 @@ option = st.selectbox(
     files
 )
 
-st.write("You selected:", option)
+if option:
+    st.write("You selected:", option)
 
 design_config = designs_dir / option / "config.json"
 if os.path.exists(design_config):
@@ -51,7 +52,12 @@ if uploaded_file is not None:
 
     logger.debug(f"File extracted to: {design_folder}")
 
-if st.button("Run LibreLane"):
+if "running" not in st.session_state:
+    st.session_state.running = False
+
+st.button("Run LibreLane", type="primary", on_click=lambda: st.session_state.update(running=True) if not st.session_state.running else None, disabled=st.session_state.running)
+
+if st.session_state.running:
 
     cmd = [
         "python",
@@ -70,29 +76,6 @@ if st.button("Run LibreLane"):
         text=True,
         bufsize=1,
     )
-
-    # Get the latest runs for the selected design
-    # latest_run = max(
-    #     [d for d in (designs_dir / option / "runs").iterdir() if d.is_dir()],
-    #     key=lambda d: d.name
-    # )
-
-    # logger.debug(latest_run)
-
-    # my_bar = st.progress(0, text="Running LibreLane...")
-
-    # for d in latest_run.iterdir():
-    #     if d.is_dir():
-    #         st.text(f"Processing {d.name}...")
-
-    # for chunk in iter(process.stdout.readline, ""):
-    #     chunk = chunk.replace("\r", "").rstrip()
-
-    #     # skip empty noise
-    #     if not chunk:
-    #         continue
-
-    #     logger.info(chunk)
 
     # log_box = st.empty()
     log_lines = []
@@ -116,6 +99,40 @@ if st.button("Run LibreLane"):
     return_code = process.wait()
 
     if return_code == 0:
+        st.session_state.running = False
         st.success("LibreLane completed successfully.")
+        # Get the latest runs for the selected design
+        latest_run = max(
+            [d for d in (designs_dir / option / "runs").iterdir() if d.is_dir()],
+            key=lambda d: d.name
+        )
+
+        logger.debug(latest_run)
+
+        if (latest_run / "39-openroad-globalrouting").exists():
+            st.success("Global routing completed successfully.")
+            import gdstk
+
+            latest_run = max(
+                [d for d in (designs_dir / option / "runs").iterdir() if d.is_dir()],
+                key=lambda d: d.name
+            )
+
+            gdss = Path(latest_run / "final" / "gds" / f"{option}.gds")
+            library = gdstk.read_gds(gdss)
+            top_cells = library.top_level()
+
+            # this is to hide all layer labels
+            label_style = {(i,0):  {"fill": "none", "stroke": "red", "font-size": "0px"} for i in range(256)}
+            top_cells[0].write_svg(str(latest_run / "final" / "gds" / f"{option}.svg"),
+                                label_style=label_style)
+            
+            # Display the SVG file in Streamlit
+            # st.image('gcd.svg')
+
+            import cairosvg
+            cairosvg.svg2png(url=str(latest_run / "final" / "gds" / f"{option}.svg"), write_to=str(latest_run / "final" / "gds" / f"{option}.png"))
+            st.image(str(latest_run / "final" / "gds" / f"{option}.png"), caption=f"{option} design")
     else:
+        st.session_state.running = False
         st.error(f"LibreLane failed with exit code {return_code}")
