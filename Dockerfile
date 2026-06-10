@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
 
 ENV PATH="${PATH}:/root/.local/bin"
 
+RUN python -m ensurepip
+RUN python -m pip install librelane
 RUN python3 -m venv .venv
 RUN .venv/bin/pip install loguru librelane streamlit gdstk cairosvg
 
