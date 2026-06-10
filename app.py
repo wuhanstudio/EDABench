@@ -71,28 +71,28 @@ if design_option:
             "Choose a run:",
             run_files
         )
-    
-        design_output = designs_run_dir / run_option / "final" / "gds" / f"{design_option}.gds"
-        if os.path.exists(design_output):
-            with st.spinner("Generating PNG ...", show_time=True):
-                # Convert GDS to SVG for display
-                design_output_svg = designs_run_dir / run_option / "final" / "gds" / f"{design_option}.svg"
-                if not (design_output_svg).exists():
-                    library = gdstk.read_gds(design_output)
-                    top_cells = library.top_level()
-    
-                    label_style = {(i,0):  {"fill": "none", "stroke": "red", "font-size": "0px"} for i in range(256)}
-                    top_cells[0].write_svg(str(design_output_svg),
-                                        label_style=label_style)
-                
-                # Convert SVG to PNG for display
-                design_output_png = designs_run_dir / run_option / "final" / "gds" / f"{design_option}.png"
-                if not (design_output_png).exists():
-                    cairosvg.svg2png(url=str(design_output_svg), write_to=str(design_output_png))
-    
-                st.image(str(design_output_png), caption=f"{design_option} design")
-        else:
-            st.error('The chosen run does not have a valid output GDS file.', icon="🚨")
+        if run_option:
+            design_output = designs_run_dir / run_option / "final" / "gds" / f"{design_option}.gds"
+            if os.path.exists(design_output):
+                with st.spinner("Generating PNG ...", show_time=True):
+                    # Convert GDS to SVG for display
+                    design_output_svg = designs_run_dir / run_option / "final" / "gds" / f"{design_option}.svg"
+                    if not (design_output_svg).exists():
+                        library = gdstk.read_gds(design_output)
+                        top_cells = library.top_level()
+        
+                        label_style = {(i,0):  {"fill": "none", "stroke": "red", "font-size": "0px"} for i in range(256)}
+                        top_cells[0].write_svg(str(design_output_svg),
+                                            label_style=label_style)
+                    
+                    # Convert SVG to PNG for display
+                    design_output_png = designs_run_dir / run_option / "final" / "gds" / f"{design_option}.png"
+                    if not (design_output_png).exists():
+                        cairosvg.svg2png(url=str(design_output_svg), write_to=str(design_output_png))
+        
+                    st.image(str(design_output_png), caption=f"{design_option} design")
+            else:
+                st.error('The chosen run does not have a valid output GDS file.', icon="🚨")
     
     st_display_gds(design_option)
     
