@@ -64,6 +64,8 @@ if design_option:
     def st_display_gds(design_option):
         # List runs for the selected design
         designs_run_dir = Path("designs") / design_option / "runs"
+        if not os.path.exists(designs_run_dir):
+            os.makedirs(designs_run_dir)
         run_files = [f.name for f in designs_run_dir.iterdir() if f.is_dir()]
         run_option = st.selectbox(
             "Choose a run:",
