@@ -1,5 +1,9 @@
 # EDABench
 
+```
+sudo apt install libcairo-dev
+```
+
 Install Docker:
 
 ```
