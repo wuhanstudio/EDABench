@@ -12,6 +12,9 @@ import cairosvg
 
 st.title("EDABench")
 
+if not os.path.exists("designs"):
+    os.makedirs("designs")
+
 if not os.path.exists("temp"):
     os.makedirs("temp")
 
