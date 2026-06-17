@@ -1,5 +1,18 @@
 # EDABench
 
+## OpenROAD (TCL)
+
+LibreLane detects and imports all Python modules found that have the prefix `librelane_plugin_`.
+
+```
+nix-shell ~/librelane/shell.nix
+python -m librelane designs/pm32/config.json
+```
+
+The script is available at [librelane_plugin_ml/scripts](https://github.com/wuhanstudio/EDABench/tree/main/librelane_plugin_ml/scripts)
+
+## Streamlit GUI
+
 ```
 sudo apt install libcairo-dev
 ```
