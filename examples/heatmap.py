@@ -1,33 +1,69 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
-# Load heatmap data
-df = pd.read_csv("rudy.map")
+MAP_FILES = ["pin.map", "placement.map", "routing.map", "rudy.map"]
+CANVAS_SIZE = 256
 
-# Determine original heatmap dimensions
-width = df["x1"].max()
-height = df["y1"].max()
+def infer_cell_size(df: pd.DataFrame) -> float:
+    x_starts = np.sort(df["x0"].astype(float).unique())
+    y_starts = np.sort(df["y0"].astype(float).unique())
+    deltas = []
 
-# Create full-resolution heatmap
-heatmap = np.zeros((256, 256), dtype=np.float32)
+    if len(x_starts) > 1:
+        deltas.extend(np.diff(x_starts))
+    if len(y_starts) > 1:
+        deltas.extend(np.diff(y_starts))
 
-for _, row in df.iterrows():
-    # Convert coordinates to 256x256 pixel indices
-    x0 = int(round(row["x0"] / width * 256))
-    x1 = int(round(row["x1"] / width * 256))
-    y0 = int(round(row["y0"] / height * 256))
-    y1 = int(round(row["y1"] / height * 256))
+    positive_deltas = [delta for delta in deltas if delta > 0]
+    if not positive_deltas:
+        raise ValueError("Unable to infer cell size from map coordinates")
 
-    heatmap[y0:y1, x0:x1] = row["value (%)"]
+    return float(min(positive_deltas))
 
-# Normalize to 0-255
-heatmap -= heatmap.min()
-heatmap /= heatmap.max()
-heatmap = (heatmap * 255).astype(np.uint8)
 
-plt.imshow(heatmap, cmap='plasma', interpolation='nearest')
-plt.show()
+def build_heatmap(df: pd.DataFrame) -> np.ndarray:
+    cell_size = infer_cell_size(df)
 
-# Save image
-plt.imsave("heatmap_256x256.png", heatmap, cmap='plasma', format='png')
+    width = int(np.ceil(df["x1"].astype(float).max() / cell_size))
+    height = int(np.ceil(df["y1"].astype(float).max() / cell_size))
+
+    heatmap = np.zeros((height, width), dtype=np.float32)
+
+    for _, row in df.iterrows():
+        x0 = int(round(float(row["x0"]) / cell_size))
+        x1 = int(round(float(row["x1"]) / cell_size))
+        y0 = int(round(float(row["y0"]) / cell_size))
+        y1 = int(round(float(row["y1"]) / cell_size))
+
+        heatmap[y0:y1, x0:x1] = float(row.iloc[-1])
+
+    heatmap -= heatmap.min()
+    max_value = heatmap.max()
+    if max_value > 0:
+        heatmap /= max_value
+
+    return (heatmap * 255).astype(np.uint8)
+
+
+def plot_map(map_path: Path) -> None:
+    df = pd.read_csv(map_path)
+    heatmap = build_heatmap(df)
+    canvas = np.zeros((CANVAS_SIZE, CANVAS_SIZE), dtype=np.uint8)
+
+    if heatmap.shape[0] > CANVAS_SIZE or heatmap.shape[1] > CANVAS_SIZE:
+        raise ValueError(f"{map_path.name} does not fit inside a {CANVAS_SIZE}x{CANVAS_SIZE} canvas")
+
+    y_offset = (CANVAS_SIZE - heatmap.shape[0]) // 2
+    x_offset = (CANVAS_SIZE - heatmap.shape[1]) // 2
+    canvas[y_offset:y_offset + heatmap.shape[0], x_offset:x_offset + heatmap.shape[1]] = heatmap
+
+    output_path = map_path.with_name(f"{map_path.stem}_heatmap.png")
+
+    plt.imsave(output_path, canvas, cmap="plasma", format="png")
+    print(f"Saved {output_path}")
+
+if __name__ == "__main__":
+    for map_name in MAP_FILES:
+        plot_map(Path(map_name))
