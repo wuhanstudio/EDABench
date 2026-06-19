@@ -1,7 +1,12 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import cv2
+import torch
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from gpdl import GPDL
 
 MAP_FILES = ["pin.map", "placement.map", "routing.map", "rudy.map"]
 CANVAS_SIZE = 256
@@ -66,4 +71,25 @@ def plot_map(map_path: Path) -> None:
 
 if __name__ == "__main__":
     for map_name in MAP_FILES:
-        plot_map(Path(map_name))
+        plot_map(Path(f"examples/{map_name}"))
+
+    # Read placement heatmap and RUDY heatmap from png
+    macro_placement_heatmap = cv2.imread("examples/placement_heatmap.png", cv2.IMREAD_GRAYSCALE)
+    rudy_heatmap = cv2.imread("examples/rudy_heatmap.png", cv2.IMREAD_GRAYSCALE)
+
+    # Construct input tensor for GPDL model
+    input = np.stack([macro_placement_heatmap, rudy_heatmap], axis=0)  # Shape: (2, H, W)
+
+    model = GPDL(in_channels=2, out_channels=1)
+    model.init_weights(pretrained="models/circuitnet_10000.pth")
+    model.eval()
+
+    # Convert input to torch tensor and add batch dimension
+    input = torch.from_numpy(input).unsqueeze(0).float()  # Shape: (1, 2, H, W)
+
+    prediction = model(input)
+    prediction = prediction.float().detach().cpu().numpy()
+
+    # Plot the prediction heatmap
+    plt.imshow(prediction.squeeze(), cmap='hot', interpolation='nearest')
+    plt.show()
