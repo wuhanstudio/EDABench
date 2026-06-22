@@ -144,6 +144,11 @@ def st_run_librelane(design_option, design_config, workflow_option):
 
     if st.session_state.running:
         with st.spinner("Running design ...", show_time=True):
+            # Remove existing .map files in the current directory
+            # for map_file in ["placement.map", "rudy.map"]:
+            #     if Path(map_file).exists():
+            #         Path(map_file).unlink()
+
             cmd = ["python", "-m", "librelane", "--dockerized", str(design_config_json)]
             designs_run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -209,8 +214,8 @@ def st_run_librelane(design_option, design_config, workflow_option):
                     macro_placement_heatmap = cv2.imread(placement_heatmap_path, cv2.IMREAD_GRAYSCALE)
                     rudy_heatmap = cv2.imread(rudy_heatmap_path, cv2.IMREAD_GRAYSCALE)
                     
-                    col1, col2 = st.columns(2)
-
+                    col1, col2, col3 = st.columns(3)
+ 
                     with col1:
                         st.image(macro_placement_heatmap, caption=f"Macro placement heatmap")
 
@@ -231,10 +236,8 @@ def st_run_librelane(design_option, design_config, workflow_option):
                     prediction = prediction.float().detach().cpu().numpy()
 
                     # Plot the prediction heatmap
-                    st.image(prediction.squeeze(), caption="Predicted congestion heatmap", clamp=True, channels="GRAY")
-                    # plt.imshow(prediction.squeeze(), cmap='hot', interpolation='nearest')
-                    # plt.show()
-
+                    with col3:
+                        st.image(prediction.squeeze(), caption="Predicted congestion heatmap", clamp=True, channels="GRAY")
 
                 # Display the GDS file for the latest run
                 if (latest_run / "39-openroad-globalrouting").exists():
