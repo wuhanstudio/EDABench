@@ -17,7 +17,8 @@ from gpdl import GPDL
 ML_FLOW_META = {
     "flow": "Classic",
     "substituting_steps": {
-        "+OpenROAD.GlobalRouting": "OpenROAD.ExportCongestionMap"
+        "+OpenROAD.GlobalRouting": "OpenROAD.ExportCongestionMap",
+        "+Misc.ReportManufacturability": "OpenROAD.ExportGroundTruth"
     },
 }
 
@@ -145,9 +146,9 @@ def st_run_librelane(design_option, design_config, workflow_option):
     if st.session_state.running:
         with st.spinner("Running design ...", show_time=True):
             # Remove existing .map files in the current directory
-            # for map_file in ["placement.map", "rudy.map"]:
-            #     if Path(map_file).exists():
-            #         Path(map_file).unlink()
+            for map_file in ["placement.map", "rudy.map", "routing_gt.map"]:
+                if Path(map_file).exists():
+                    Path(map_file).unlink()
 
             cmd = ["python", "-m", "librelane", "--dockerized", str(design_config_json)]
             designs_run_dir.mkdir(parents=True, exist_ok=True)
@@ -213,7 +214,7 @@ def st_run_librelane(design_option, design_config, workflow_option):
                     # Read placement heatmap and RUDY heatmap from png
                     macro_placement_heatmap = cv2.imread(placement_heatmap_path, cv2.IMREAD_GRAYSCALE)
                     rudy_heatmap = cv2.imread(rudy_heatmap_path, cv2.IMREAD_GRAYSCALE)
-                    
+
                     col1, col2, col3 = st.columns(3)
  
                     with col1:
@@ -238,6 +239,27 @@ def st_run_librelane(design_option, design_config, workflow_option):
                     # Plot the prediction heatmap
                     with col3:
                         st.image(prediction.squeeze(), caption="Predicted congestion heatmap", clamp=True, channels="GRAY")
+
+                if Path("routing_gt.map").exists():
+                    logger.debug("Found routing_gt.map in the current directory.")
+                    st.success("Found routing_gt.map.")
+
+                    # Move the ground truth file to the latest run directory
+                    (latest_run / "routing_gt.map").write_bytes(Path("routing_gt.map").read_bytes())
+
+                    gt_heatmap_path = plot_map(
+                        latest_run / "routing_gt.map"
+                    )
+
+                    gt_heatmap = cv2.imread(gt_heatmap_path, cv2.IMREAD_GRAYSCALE)
+                    st.image(gt_heatmap, caption=f"Ground truth heatmap")
+
+                    # Calculate the absolute difference between the predicted heatmap and the ground truth heatmap
+                    # Convert prediction to the same scale as gt_heatmap if necessary
+                    prediction_scaled = cv2.normalize(prediction.squeeze(), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX).astype(np.uint8)
+                    diff_heatmap = cv2.absdiff(prediction_scaled, gt_heatmap)
+
+                    st.image(diff_heatmap, caption=f"Difference heatmap")
 
                 # Display the GDS file for the latest run
                 if (latest_run / "39-openroad-globalrouting").exists():
@@ -271,10 +293,11 @@ def st_run_librelane(design_option, design_config, workflow_option):
                             latest_run / "final" / "gds" / f"{design_option}.png"
                         ),
                     )
-                    st.image(
-                        str(latest_run / "final" / "gds" / f"{design_option}.png"),
-                        caption=f"{design_option} design",
-                    )
+
+                    # st.image(
+                    #     str(latest_run / "final" / "gds" / f"{design_option}.png"),
+                    #     caption=f"{design_option} design",
+                    # )
             else:
                 st.session_state.running = False
                 st.error(f"LibreLane failed with exit code {return_code}")

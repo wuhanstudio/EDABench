@@ -9,7 +9,7 @@ import numpy as np
 from loguru import logger
 
 from upload import st_upload_design
-from librelane import librelane_design_config, st_display_gds, st_run_librelane
+from workflow import librelane_design_config, st_display_gds, st_run_librelane
 
 if __name__ == "__main__":
     st.set_page_config(page_title="EDABench", page_icon=":robot_face:", layout="wide")
