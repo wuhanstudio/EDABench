@@ -65,17 +65,17 @@ def plot_map(map_path: Path) -> None:
     canvas[y_offset:y_offset + heatmap.shape[0], x_offset:x_offset + heatmap.shape[1]] = heatmap
 
     output_path = map_path.with_name(f"{map_path.stem}_heatmap.png")
-
     plt.imsave(output_path, canvas, cmap="plasma", format="png")
-    print(f"Saved {output_path}")
+
+    return output_path
 
 if __name__ == "__main__":
     for map_name in MAP_FILES:
-        plot_map(Path(f"examples/{map_name}"))
+        plot_map(Path(f"{map_name}"))
 
     # Read placement heatmap and RUDY heatmap from png
-    macro_placement_heatmap = cv2.imread("examples/placement_heatmap.png", cv2.IMREAD_GRAYSCALE)
-    rudy_heatmap = cv2.imread("examples/rudy_heatmap.png", cv2.IMREAD_GRAYSCALE)
+    macro_placement_heatmap = cv2.imread("placement_heatmap.png", cv2.IMREAD_GRAYSCALE)
+    rudy_heatmap = cv2.imread("rudy_heatmap.png", cv2.IMREAD_GRAYSCALE)
 
     # Construct input tensor for GPDL model
     input = np.stack([macro_placement_heatmap, rudy_heatmap], axis=0)  # Shape: (2, H, W)
