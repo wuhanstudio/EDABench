@@ -162,10 +162,10 @@ if __name__ == "__main__":
             model.eval()
 
             # Read placement heatmap and RUDY heatmap from png
-            macro_region_path = designs_run_dir / ml_run_option / "placement.png"
+            macro_region_path = designs_run_dir / ml_run_option / "placement_heatmap.png"
             macro_placement_heatmap = cv2.imread(macro_region_path, cv2.IMREAD_GRAYSCALE)
             
-            rudy_heatmap_path = designs_run_dir / ml_run_option / "rudy.png"
+            rudy_heatmap_path = designs_run_dir / ml_run_option / "rudy_heatmap.png"
             rudy_heatmap = cv2.imread(rudy_heatmap_path, cv2.IMREAD_GRAYSCALE)
 
             # Construct input tensor for GPDL model

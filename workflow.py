@@ -218,6 +218,7 @@ def st_run_librelane(design_option, design_config, workflow_option):
                     )
 
                 logger.debug(latest_run)
+                from heatmap import plot_map
                 if Path("placement.map").exists() and Path("rudy.map").exists():
                     logger.debug("Found placement.map and rudy.map in the current directory.")
                     st.success("Found placement.map and rudy.map.")
@@ -226,7 +227,6 @@ def st_run_librelane(design_option, design_config, workflow_option):
                     (latest_run / "placement.map").write_bytes(Path("placement.map").read_bytes())
                     (latest_run / "rudy.map").write_bytes(Path("rudy.map").read_bytes())
 
-                    from heatmap import plot_map
                     placement_heatmap_path = plot_map(
                         latest_run / "placement.map"
                     )
@@ -279,10 +279,9 @@ def st_run_librelane(design_option, design_config, workflow_option):
 
                     # Calculate the absolute difference between the predicted heatmap and the ground truth heatmap
                     # Convert prediction to the same scale as gt_heatmap if necessary
-                    prediction_scaled = cv2.normalize(prediction.squeeze(), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX).astype(np.uint8)
-                    diff_heatmap = cv2.absdiff(prediction_scaled, gt_heatmap)
-
-                    st.image(diff_heatmap, caption=f"Difference heatmap")
+                    # prediction_scaled = cv2.normalize(prediction.squeeze(), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX).astype(np.uint8)
+                    # diff_heatmap = cv2.absdiff(prediction_scaled, gt_heatmap)
+                    # st.image(diff_heatmap, caption=f"Difference heatmap")
 
                 # Display the GDS file for the latest run
                 if (latest_run / "39-openroad-globalrouting").exists():
