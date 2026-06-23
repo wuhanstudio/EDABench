@@ -102,7 +102,8 @@ if __name__ == "__main__":
     if "ml_running" not in st.session_state:
         st.session_state.ml_running = False
 
-    st.button("Run Machine Learning", type="primary", on_click=lambda: st.session_state.update(ml_running=True) if not st.session_state.ml_running else None, disabled=st.session_state.ml_running)
+    if macro_region_file is not None and rudy_heatmap_file is not None:
+        st.button("Run Machine Learning", type="primary", on_click=lambda: st.session_state.update(ml_running=True) if not st.session_state.ml_running else None, disabled=st.session_state.ml_running)
 
     if st.session_state.ml_running:
         import torch
