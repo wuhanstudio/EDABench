@@ -1,6 +1,7 @@
 import os
 import json
 from pathlib import Path
+from time import gmtime, strftime
 
 import streamlit as st
 from loguru import logger
@@ -14,11 +15,18 @@ import torch
 import numpy as np
 from gpdl import GPDL
 
+CLASSIC_FLOW_META = {
+    "flow": "Classic",
+    "substituting_steps": {
+        "+Misc.ReportManufacturability": "OpenROAD.ExportGroundTruth"
+    },
+}
+
 ML_FLOW_META = {
     "flow": "Classic",
     "substituting_steps": {
         "+OpenROAD.GlobalRouting": "OpenROAD.ExportCongestionMap",
-        "+Misc.ReportManufacturability": "OpenROAD.ExportGroundTruth"
+        # "+Misc.ReportManufacturability": "OpenROAD.ExportGroundTruth"
     },
 }
 
@@ -34,8 +42,8 @@ def librelane_design_config(design_config: Path, workflow_option: str):
         config_data = json.load(config_file)
 
     if workflow_option == "Classic":
-        config_data.pop("meta", None)
-        config_data["flow"] = "Classic"
+        config_data.pop("flow", None)
+        config_data["meta"] = CLASSIC_FLOW_META
     else:
         config_data.pop("flow", None)
         config_data["meta"] = ML_FLOW_META
@@ -61,7 +69,7 @@ def st_display_gds(design_option):
     if not os.path.exists(designs_run_dir):
         os.makedirs(designs_run_dir)
 
-    run_files = [f.name for f in designs_run_dir.iterdir() if f.is_dir()]
+    run_files = [f.name for f in designs_run_dir.iterdir() if f.is_dir() and f.name.startswith(("Classic_"))]
     run_option = st.selectbox("Choose a run:", run_files)
 
     # If a run is selected, display the GDS file for that run
@@ -150,7 +158,16 @@ def st_run_librelane(design_option, design_config, workflow_option):
                 if Path(map_file).exists():
                     Path(map_file).unlink()
 
-            cmd = ["python", "-m", "librelane", "--dockerized", str(design_config_json)]
+            current = strftime("%Y-%m-%d_%H-%M-%S", gmtime())
+
+            if workflow_option == "Classic":
+                # Classic_date_time
+                run_name = f"Classic_{current}"
+                cmd = ["python", "-m", "librelane", "--run-tag", run_name, "--dockerized", str(design_config_json)]
+            else:
+                run_name = f"ML_{current}"
+                cmd = ["python", "-m", "librelane", "--run-tag", run_name, "-T", "OpenROAD.ExportCongestionMap", "--dockerized", str(design_config_json)]
+
             designs_run_dir.mkdir(parents=True, exist_ok=True)
 
             log_box = st.empty()
@@ -189,10 +206,16 @@ def st_run_librelane(design_option, design_config, workflow_option):
                 st.session_state.running = False
                 st.success("LibreLane completed successfully.")
                 # Get the latest runs for the selected design
-                latest_run = max(
-                    [d for d in (designs_run_dir).iterdir() if d.is_dir()],
-                    key=lambda d: d.name,
-                )
+                if workflow_option == "Classic":
+                    latest_run = max(
+                        [d for d in (designs_run_dir).iterdir() if d.is_dir() and d.name.startswith("Classic_")],
+                        key=lambda d: d.name,
+                    )
+                else:
+                    latest_run = max(
+                        [d for d in (designs_run_dir).iterdir() if d.is_dir() and d.name.startswith(("ML_"))],
+                        key=lambda d: d.name,
+                    )
 
                 logger.debug(latest_run)
                 if Path("placement.map").exists() and Path("rudy.map").exists():

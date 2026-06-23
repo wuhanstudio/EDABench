@@ -130,3 +130,59 @@ if __name__ == "__main__":
 
             st.session_state.ml_running = False
             st.success("Machine learning completed successfully.")
+
+    # List existing runs for the selected design
+    designs_run_dir = Path("designs") / design_option / "runs"
+    if not os.path.exists(designs_run_dir):
+        os.makedirs(designs_run_dir)
+
+    classic_run_files = [f.name for f in designs_run_dir.iterdir() if f.is_dir() and f.name.startswith(("Classic_"))]
+    classic_run_option = st.selectbox("Choose a Classic run:", classic_run_files)
+
+    # If a run is selected, display the GDS file for that run
+    from heatmap import plot_map
+    if classic_run_option:
+        gt_heatmap_path = plot_map(
+            designs_run_dir / classic_run_option / "routing_gt.map"
+        )
+
+        gt_heatmap = cv2.imread(gt_heatmap_path, cv2.IMREAD_GRAYSCALE)
+        st.image(gt_heatmap, caption=f"Ground truth heatmap")
+
+    ml_run_files = [f.name for f in designs_run_dir.iterdir() if f.is_dir() and f.name.startswith(("ML_"))]
+    ml_run_option = st.selectbox("Choose a ML run:", ml_run_files)
+
+    if ml_run_option:
+        import torch
+        from gpdl import GPDL
+
+        with st.spinner("Running machine learning ...", show_time=True):
+            model = GPDL(in_channels=2, out_channels=1)
+            model.init_weights(pretrained="models/circuitnet_10000.pth")
+            model.eval()
+
+            # Read placement heatmap and RUDY heatmap from png
+            macro_region_path = designs_run_dir / ml_run_option / "placement.png"
+            macro_placement_heatmap = cv2.imread(macro_region_path, cv2.IMREAD_GRAYSCALE)
+            
+            rudy_heatmap_path = designs_run_dir / ml_run_option / "rudy.png"
+            rudy_heatmap = cv2.imread(rudy_heatmap_path, cv2.IMREAD_GRAYSCALE)
+
+            # Construct input tensor for GPDL model
+            input = np.stack([macro_placement_heatmap, rudy_heatmap], axis=0)  # Shape: (2, H, W)
+
+            # Convert input to torch tensor and add batch dimension
+            input = torch.from_numpy(input).unsqueeze(0).float()  # Shape: (1, 2, H, W)
+
+            prediction = model(input)
+            prediction = prediction.float().detach().cpu().numpy()
+
+            st.image(prediction.squeeze(), caption="Predicted heatmap", clamp=True, channels="GRAY")
+
+        if classic_run_option:
+            # Calculate the absolute difference between the predicted heatmap and the ground truth heatmap
+            # Convert prediction to the same scale as gt_heatmap if necessary
+            prediction_scaled = cv2.normalize(prediction.squeeze(), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX).astype(np.uint8)
+            ml_diff_heatmap = cv2.absdiff(prediction_scaled, gt_heatmap)
+
+            st.image(ml_diff_heatmap, caption=f"Difference heatmap for ML run")
