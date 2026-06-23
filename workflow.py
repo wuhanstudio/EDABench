@@ -163,10 +163,10 @@ def st_run_librelane(design_option, design_config, workflow_option):
             if workflow_option == "Classic":
                 # Classic_date_time
                 run_name = f"Classic_{current}"
-                cmd = ["python", "-m", "librelane", "--run-tag", run_name, "--dockerized", str(design_config_json)]
+                cmd = ["python", "-m", "librelane", "--dockerized", "--run-tag", run_name, str(design_config_json)]
             else:
                 run_name = f"ML_{current}"
-                cmd = ["python", "-m", "librelane", "--run-tag", run_name, "-T", "OpenROAD.ExportCongestionMap", "--dockerized", str(design_config_json)]
+                cmd = ["python", "-m", "librelane", "--dockerized", "--run-tag", run_name, "-T", "OpenROAD.ExportCongestionMap", str(design_config_json)]
 
             designs_run_dir.mkdir(parents=True, exist_ok=True)
 
