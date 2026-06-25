@@ -284,7 +284,7 @@ def st_run_librelane(design_option, design_config, workflow_option):
                     # st.image(diff_heatmap, caption=f"Difference heatmap")
 
                 # Display the GDS file for the latest run
-                if (latest_run / "39-openroad-globalrouting").exists():
+                if (latest_run / "final" / "gds").exists():
                     st.success("Global routing completed successfully.")
 
                     latest_run = max(
