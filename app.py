@@ -164,7 +164,7 @@ if __name__ == "__main__":
 
         with st.spinner("Running machine learning ...", show_time=True):
             model = GPDL(in_channels=2, out_channels=1)
-            model.init_weights(pretrained=model_path)
+            model.init_weights(pretrained=str(model_path))
             model.eval()
 
             # Read placement heatmap and RUDY heatmap from png
