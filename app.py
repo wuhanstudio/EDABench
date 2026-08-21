@@ -42,6 +42,11 @@ if __name__ == "__main__":
         ],
     )
 
+    models_dir = Path("models")
+    model_files = sorted(path.name for path in models_dir.glob("*.pth"))
+    model_option = st.selectbox("Choose a machine learning model:", model_files)
+    model_path = models_dir / model_option if model_option else None
+
     # Part 2: Run Librelane on the selected design
     if design_option:
         design_config = designs_dir / design_option / "config.json"
@@ -64,7 +69,7 @@ if __name__ == "__main__":
             st.session_state.running = False
 
         # Run LibreLane on the selected design
-        st_run_librelane(design_option, design_config, workflow_option)
+        st_run_librelane(design_option, design_config, workflow_option, model_path)
 
         # Display the GDS file for the selected design
         st_display_gds(design_option)
@@ -111,7 +116,7 @@ if __name__ == "__main__":
 
         with st.spinner("Running machine learning ...", show_time=True):
             model = GPDL(in_channels=2, out_channels=1)
-            model.init_weights(pretrained="models/circuitnet_10000.pth")
+            model.init_weights(pretrained=model_path)
             model.eval()
 
             # Read placement heatmap and RUDY heatmap from png
@@ -159,7 +164,7 @@ if __name__ == "__main__":
 
         with st.spinner("Running machine learning ...", show_time=True):
             model = GPDL(in_channels=2, out_channels=1)
-            model.init_weights(pretrained="models/circuitnet_10000.pth")
+            model.init_weights(pretrained=model_path)
             model.eval()
 
             # Read placement heatmap and RUDY heatmap from png

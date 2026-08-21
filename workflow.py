@@ -122,7 +122,7 @@ def st_display_gds(design_option):
 
 
 @st.fragment
-def st_run_librelane(design_option, design_config, workflow_option):
+def st_run_librelane(design_option, design_config, workflow_option, model_path):
     """
     Run LibreLane for the selected design.
 
@@ -130,6 +130,7 @@ def st_run_librelane(design_option, design_config, workflow_option):
         design_option (str): The name of the selected design.
         design_config (str): The content of the design config file (JSON).
         workflow_option (str): The selected workflow option ("Classic" or "ML Congestion Map").
+        model_path (Path | None): The selected machine learning model checkpoint.
     """
 
     designs_run_dir = Path("designs") / design_option / "runs"
@@ -250,7 +251,7 @@ def st_run_librelane(design_option, design_config, workflow_option):
                     input = np.stack([macro_placement_heatmap, rudy_heatmap], axis=0)  # Shape: (2, H, W)
 
                     model = GPDL(in_channels=2, out_channels=1)
-                    model.init_weights(pretrained="models/circuitnet_10000.pth")
+                    model.init_weights(pretrained=model_path)
                     model.eval()
 
                     # Convert input to torch tensor and add batch dimension
