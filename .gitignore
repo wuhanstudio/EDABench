@@ -1,6 +1,8 @@
 *.map
 *.pyc
 .venv
-temp/
-designs/
 *.png
+temp/
+datasets/
+designs/
+figures/
