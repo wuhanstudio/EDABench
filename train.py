@@ -2,6 +2,7 @@ import os
 import argparse
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from loguru import logger
 
 import torch
 from torch.utils.data import DataLoader
@@ -11,18 +12,20 @@ from pytorch_msssim import SSIM
 from congestion.model import CongestionModel
 from congestion.dataloader import LibrelaneDataset
 
-device = 'cpu'  # torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-use_amp = False # torch.cuda.is_available()
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+use_amp = torch.cuda.is_available()
 
 def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
 
     #data
-    dataset = LibrelaneDataset(root_dir=rootpath,transform=True)
-    len_train_set = int(len(dataset)*0.9)
-    len_test_set = len(dataset)-len_train_set
-    train_set, test_set = torch.utils.data.random_split(dataset, [len_train_set,len_test_set])
-    train_loader = DataLoader(dataset=train_set, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(dataset=test_set, batch_size=10, shuffle=True)
+    train_dataset = LibrelaneDataset(root_dir=rootpath + "/training",transform=True)
+    test_dataset = LibrelaneDataset(root_dir=rootpath + "/testing",transform=True)
+
+    len_train_set = len(train_dataset)
+    len_test_set  = len(test_dataset)
+
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
     #model
     model = CongestionModel(device).to(device)
@@ -33,23 +36,27 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
     #optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0)
 
-    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    scaler = torch.amp.GradScaler('cuda') if use_amp else None
 
-    print('Start training')
+    logger.info('Start training')
     train_losses = []
     valid_losses = []
     best_test_Loss = 99999999999999
     best_train_Loss = 99999999999999
 
-    for e in tqdm(range(num_epochs), desc='Epoch'):
+    for e in range(num_epochs):
+        logger.info(f'Epoch {e}/{num_epochs - 1}')
+
+        # Training
         t = 0
         n1 = 0
-        for batch_idx, (features, labels) in enumerate(train_loader):
+
+        for batch_idx, (features, labels) in tqdm(enumerate(train_loader), total=len(train_loader), desc='Train'):
             features = features.to(device=device)
             labels = labels.to(device=device)
 
             if use_amp:
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast('cuda'):
                     pred = model(features)
                     train_loss = criterion(pred, labels) * 1000
                 optimizer.zero_grad()
@@ -67,18 +74,16 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
             n1 += 1
         train_losses.append(t/n1)
 
-
-
-        #eval
+        # Evaluation
         model.eval()
         v = 0
         n2 = 0
-        for batch_idx, (features, labels) in enumerate(test_loader):
+        for batch_idx, (features, labels) in tqdm(enumerate(test_loader), total=len(test_loader), desc='Test'):
             features = features.to(device=device)
             labels = labels.to(device=device)
 
             if use_amp:
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast('cuda'):
                     pred = model(features)
                     pred = model.sigmoid(pred)
                     test_loss = 1.0 - ssim(pred.float(), labels.float())
@@ -92,16 +97,18 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
         valid_losses.append(v/n2)
 
 
-        print("\n")
-        print(f'Epoch {e}: Train Loss: {t/n1}  | Test Loss: {v/n2}')
-        if v/n2 < best_test_Loss:
-            print(f'Best Epoch {e}: Test Loss: {v/n2}')
-            torch.save(model.state_dict(), f'{weight_savepath}/congestion_weights.pt')
-            best_test_Loss = v/n2
+        logger.info("\n")
+        logger.info(f'Epoch {e}: Train Loss: {t/n1/1000}  | Test Loss: {v/n2}')
+
         if t/n1 < best_train_Loss:
-            print(f'Best Epoch {e}: Train Loss: {t/n1}')
-            torch.save(model.state_dict(), f'{weight_savepath}/congestion_train_weights.pt')
+            logger.info(f'Best Epoch {e}: Train Loss: {t/n1/1000}')
+            torch.save(model.state_dict(), f'{weight_savepath}/congestion_best_train_weights.pth')
             best_train_Loss = t/n1
+
+        if v/n2 < best_test_Loss:
+            logger.info(f'Best Epoch {e}: Test Loss: {v/n2}')
+            torch.save(model.state_dict(), f'{weight_savepath}/congestion_best_test_weights.pth')
+            best_test_Loss = v/n2
 
         fig = plt.figure()
         epochnum = list(range(0,len(train_losses)))
@@ -113,7 +120,7 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
         plt.title("Train Loss")
         plt.grid(linestyle=':')
         plt.savefig(f"{fig_savepath}/train_losses.png")
-        plt.clf()
+        plt.close(fig)
 
         fig = plt.figure()
         epochnum = list(range(0,len(train_losses)))
@@ -126,7 +133,7 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
         plt.title("Val Loss")
         plt.grid(linestyle=':')
         plt.savefig(f"{fig_savepath}/val_losses.png")
-        plt.clf()
+        plt.close(fig)
 
 
         fig, ax = plt.subplots(1, 2, figsize=(9, 4.5), tight_layout=True)
@@ -136,13 +143,13 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
         ax[0].title.set_text('Pred')
         ax[1].title.set_text('Label')
         plt.savefig(f"{fig_savepath}/compare.png")
-        plt.clf()
+        plt.close(fig)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Librelane Congestion Model Training")
-    parser.add_argument("--root_path", default="./datasets/training", type=str, help='The path of the data file')
+    parser.add_argument("--root_path", default="./datasets/", type=str, help='The path of the data file')
     parser.add_argument("--batch_size", default=8, type=int, help='The batch size')
-    parser.add_argument("--num_epochs", default=1000, type=int, help='The training epochs')
+    parser.add_argument("--num_epochs", default=20, type=int, help='The training epochs')
     parser.add_argument("--weight_path", default="./models/model_weight", type=str, help='The path to save the model weight')
     parser.add_argument("--fig_path", default="./figures", type=str, help='The path of the figure file')
     parser.add_argument("--learning_rate", default=0.001, type=float, help='learning rate [0,1]')
@@ -162,4 +169,4 @@ if __name__ == "__main__":
     train(rootpath=args.root_path,batch_size=args.batch_size,num_epochs=args.num_epochs,lr=args.learning_rate,
           fig_savepath=args.fig_path,weight_savepath=args.weight_path)
     end = time.time()
-    print("training cost time：%f sec" % (end - start))
+    logger.info("training cost time：%f sec" % (end - start))
