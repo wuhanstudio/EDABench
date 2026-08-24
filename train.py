@@ -149,7 +149,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Librelane Congestion Model Training")
     parser.add_argument("--root_path", default="./datasets/", type=str, help='The path of the data file')
     parser.add_argument("--batch_size", default=8, type=int, help='The batch size')
-    parser.add_argument("--num_epochs", default=20, type=int, help='The training epochs')
+    parser.add_argument("--num_epochs", default=100, type=int, help='The training epochs')
     parser.add_argument("--weight_path", default="./models/model_weight", type=str, help='The path to save the model weight')
     parser.add_argument("--fig_path", default="./figures", type=str, help='The path of the figure file')
     parser.add_argument("--learning_rate", default=0.001, type=float, help='learning rate [0,1]')

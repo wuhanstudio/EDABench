@@ -13,7 +13,9 @@ import subprocess
 import cv2
 import torch
 import numpy as np
+from PIL import Image
 from gpdl import GPDL
+from congestion.model import CongestionModel
 
 CLASSIC_FLOW_META = {
     "flow": "Classic",
@@ -227,6 +229,8 @@ def st_run_librelane(design_option, design_config, workflow_option, model_path):
                     # Move the heatmap files to the latest run directory
                     (latest_run / "placement.map").write_bytes(Path("placement.map").read_bytes())
                     (latest_run / "rudy.map").write_bytes(Path("rudy.map").read_bytes())
+                    (latest_run / "pin.map").write_bytes(Path("pin.map").read_bytes())
+                    (latest_run / "routing.map").write_bytes(Path("routing.map").read_bytes())
 
                     placement_heatmap_path = plot_map(
                         latest_run / "placement.map"
@@ -234,34 +238,85 @@ def st_run_librelane(design_option, design_config, workflow_option, model_path):
                     rudy_heatmap_path = plot_map(
                         latest_run / "rudy.map"
                     )
+                    pin_heatmap_path = plot_map(
+                        latest_run / "pin.map"
+                    )
+                    gt_heatmap_path = plot_map(
+                        latest_run / "routing.map"
+                    )
 
-                    # Read placement heatmap and RUDY heatmap from png
-                    macro_placement_heatmap = cv2.imread(placement_heatmap_path, cv2.IMREAD_GRAYSCALE)
-                    rudy_heatmap = cv2.imread(rudy_heatmap_path, cv2.IMREAD_GRAYSCALE)
+                    model_name = Path(model_path).name.lower()
 
-                    col1, col2, col3 = st.columns(3)
+                    columns = st.columns(4 if model_name.startswith("librelane") else 3)
+                    col1, col2, col3 = columns[:3]
+                    col4 = columns[3] if model_name.startswith("librelane") else None
  
-                    with col1:
-                        st.image(macro_placement_heatmap, caption=f"Macro placement heatmap")
+                    if model_name.startswith("circuitnet"):
+                        macro_placement_heatmap = cv2.imread(
+                            str(placement_heatmap_path), cv2.IMREAD_GRAYSCALE
+                        )
+                        rudy_heatmap = cv2.imread(
+                            str(rudy_heatmap_path), cv2.IMREAD_GRAYSCALE
+                        )
+                        input_channels = [macro_placement_heatmap, rudy_heatmap]
+                        model = GPDL(in_channels=2, out_channels=1)
+                        model.init_weights(pretrained=model_path)
+                        device = torch.device("cpu")
+                    elif model_name.startswith("librelane"):
+                        pin_heatmap = np.array(
+                            Image.open(pin_heatmap_path).convert("L"),
+                            dtype=np.float32,
+                        ) / 255.0
+                        macro_placement_heatmap = np.array(
+                            Image.open(placement_heatmap_path).convert("L"),
+                            dtype=np.float32,
+                        ) / 255.0
+                        rudy_heatmap = np.array(
+                            Image.open(rudy_heatmap_path).convert("L"),
+                            dtype=np.float32,
+                        ) / 255.0
+                        input_channels = [
+                            pin_heatmap,
+                            macro_placement_heatmap,
+                            rudy_heatmap,
+                        ]
+                        device = torch.device(
+                            "cuda:0" if torch.cuda.is_available() else "cpu"
+                        )
+                        model = CongestionModel(device).to(device)
+                        model.load_state_dict(
+                            torch.load(model_path, map_location=device)
+                        )
+                    else:
+                        raise ValueError(f"Unsupported model checkpoint: {model_path}")
 
-                    with col2:
-                        st.image(rudy_heatmap, caption=f"RUDY heatmap")
+                    if model_name.startswith("librelane"):
+                        with col1:
+                            st.image(pin_heatmap, caption="Pin heatmap")
+                        with col2:
+                            st.image(macro_placement_heatmap, caption="Macro placement heatmap")
+                        with col3:
+                            st.image(rudy_heatmap, caption="RUDY heatmap")
+                    else:
+                        with col1:
+                            st.image(macro_placement_heatmap, caption="Macro placement heatmap")
+                        with col2:
+                            st.image(rudy_heatmap, caption="RUDY heatmap")
 
-                    # Construct input tensor for GPDL model
-                    input = np.stack([macro_placement_heatmap, rudy_heatmap], axis=0)  # Shape: (2, H, W)
-
-                    model = GPDL(in_channels=2, out_channels=1)
-                    model.init_weights(pretrained=model_path)
                     model.eval()
 
-                    # Convert input to torch tensor and add batch dimension
-                    input = torch.from_numpy(input).unsqueeze(0).float()  # Shape: (1, 2, H, W)
+                    # Convert input tensor to torch tensor and add batch dimension
+                    input = torch.from_numpy(
+                        np.stack(input_channels, axis=0)
+                    ).unsqueeze(0).float().to(device)
 
                     prediction = model(input)
+                    if model_name.startswith("librelane"):
+                        prediction = torch.sigmoid(prediction)
                     prediction = prediction.float().detach().cpu().numpy()
 
                     # Plot the prediction heatmap
-                    with col3:
+                    with (col4 if col4 is not None else col3):
                         st.image(prediction.squeeze(), caption="Predicted congestion heatmap", clamp=True, channels="GRAY")
 
                 if Path("routing_gt.map").exists():
