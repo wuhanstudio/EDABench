@@ -343,11 +343,6 @@ def st_run_librelane(design_option, design_config, workflow_option, model_path):
                 if (latest_run / "final" / "gds").exists():
                     st.success("Global routing completed successfully.")
 
-                    latest_run = max(
-                        [d for d in (designs_run_dir).iterdir() if d.is_dir()],
-                        key=lambda d: d.name,
-                    )
-
                     gdss = Path(latest_run / "final" / "gds" / f"{design_option}.gds")
                     library = gdstk.read_gds(gdss)
                     top_cells = library.top_level()
