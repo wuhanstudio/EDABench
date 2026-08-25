@@ -85,6 +85,11 @@ if __name__ == "__main__":
 
     # Part 3: Run Machine Learning on the selected design
     st.header("Machine Learning")
+    ml_design_option = st.selectbox(
+        "Choose a design for machine learning:",
+        design_files,
+        key="ml_design_option",
+    )
 
     macro_region_file = st.file_uploader("Upload the macro region", type=["png", "jpg", "jpeg"])
     rudy_heatmap_file = st.file_uploader("Upload the RUDY heatmap", type=["png", "jpg", "jpeg"])
@@ -177,8 +182,8 @@ if __name__ == "__main__":
             st.session_state.ml_running = False
             st.success("Machine learning completed successfully.")
 
-    # List existing runs for the selected design
-    designs_run_dir = Path("designs") / design_option / "runs"
+    # List existing runs for the selected design in Part 3
+    designs_run_dir = Path("designs") / ml_design_option / "runs"
     if not os.path.exists(designs_run_dir):
         os.makedirs(designs_run_dir)
 
