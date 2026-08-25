@@ -91,10 +91,21 @@ if __name__ == "__main__":
         key="ml_design_option",
     )
 
+    ml_model_paths = {
+        "CircuitNet Model": "models/circuitnet_10000.pth",
+        "Librelane Model": "models/librelane_1000.pth",
+    }
+    ml_model_option = st.selectbox(
+        "Choose a machine learning model:",
+        list(ml_model_paths),
+        key="ml_model_option",
+    )
+    ml_model_path = ml_model_paths[ml_model_option]
+
     macro_region_file = st.file_uploader("Upload the macro region", type=["png", "jpg", "jpeg"])
     rudy_heatmap_file = st.file_uploader("Upload the RUDY heatmap", type=["png", "jpg", "jpeg"])
     pin_heatmap_file = None
-    if model_option == "Librelane Model":
+    if ml_model_option == "Librelane Model":
         pin_heatmap_file = st.file_uploader("Upload the pin heatmap", type=["png", "jpg", "jpeg"])
 
     if macro_region_file is not None:
@@ -135,24 +146,24 @@ if __name__ == "__main__":
     required_inputs_uploaded = (
         macro_region_file is not None
         and rudy_heatmap_file is not None
-        and (model_option == "CircuitNet Model" or pin_heatmap_file is not None)
+        and (ml_model_option == "CircuitNet Model" or pin_heatmap_file is not None)
     )
     if required_inputs_uploaded:
         st.button("Run Machine Learning", type="primary", on_click=lambda: st.session_state.update(ml_running=True) if not st.session_state.ml_running else None, disabled=st.session_state.ml_running)
 
     if st.session_state.ml_running:
         with st.spinner("Running machine learning ...", show_time=True):
-            if model_option == "Librelane Model":
+            if ml_model_option == "Librelane Model":
                 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
                 model = CongestionModel(device).to(device)
-                model.load_state_dict(torch.load(model_path, map_location=device))
+                model.load_state_dict(torch.load(ml_model_path, map_location=device))
                 model.eval()
             else:
                 model = GPDL(in_channels=2, out_channels=1)
-                model.init_weights(pretrained=model_path)
+                model.init_weights(pretrained=ml_model_path)
             model.eval()
 
-            if model_option == "Librelane Model":
+            if ml_model_option == "Librelane Model":
                 input_channels = [
                     np.array(Image.open(pin_heatmap_path).convert("L"), dtype=np.float32) / 255.0,
                     np.array(Image.open(macro_region_path).convert("L"), dtype=np.float32) / 255.0,
@@ -169,11 +180,11 @@ if __name__ == "__main__":
 
             # Convert input to torch tensor and add batch dimension
             input = torch.from_numpy(input).unsqueeze(0).float()
-            if model_option == "Librelane Model":
+            if ml_model_option == "Librelane Model":
                 input = input.to(device)
 
             prediction = model(input)
-            if model_option == "Librelane Model":
+            if ml_model_option == "Librelane Model":
                 prediction = torch.sigmoid(prediction)
             prediction = prediction.float().detach().cpu().numpy()
 
@@ -213,14 +224,14 @@ if __name__ == "__main__":
 
         with st.spinner("Running machine learning ...", show_time=True):
 
-            if model_option == "Librelane Model":
+            if ml_model_option == "Librelane Model":
                 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
                 model = CongestionModel(device).to(device)
-                model.load_state_dict(torch.load(model_path, map_location=device))
+                model.load_state_dict(torch.load(ml_model_path, map_location=device))
                 model.eval()
             else:
                 model = GPDL(in_channels=2, out_channels=1)
-                model.init_weights(pretrained=str(model_path))
+                model.init_weights(pretrained=str(ml_model_path))
                 model.eval()
 
             # Read placement heatmap and RUDY heatmap from png
@@ -231,7 +242,7 @@ if __name__ == "__main__":
             macro_region_path = designs_run_dir / ml_run_option / "placement_heatmap.png"
             rudy_heatmap_path = designs_run_dir / ml_run_option / "rudy_heatmap.png"
             pin_heatmap_path = designs_run_dir / ml_run_option / "pin_heatmap.png"
-            if model_option == "Librelane Model":
+            if ml_model_option == "Librelane Model":
                 if not macro_region_path.exists():
                     st.error(f"The selected ML run '{ml_run_option}' does not have a placement heatmap.", icon="🚨")
                 else:
