@@ -13,7 +13,6 @@ from congestion.model import CongestionModel
 
 
 def st_machine_learning_section(designs_dir: Path, design_files):
-    st.subheader("Part 3: Machine Learning")
 
     ml_design_option = st.selectbox(
         "Choose a design for machine learning:",
@@ -70,15 +69,15 @@ def st_machine_learning_section(designs_dir: Path, design_files):
         and rudy_heatmap_file is not None
         and (ml_model_option == "CircuitNet Model" or pin_heatmap_file is not None)
     )
-    if required_inputs_uploaded:
-        st.button(
-            "Run Machine Learning",
-            type="primary",
-            on_click=lambda: st.session_state.update(ml_running=True)
-            if not st.session_state.ml_running
-            else None,
-            disabled=st.session_state.ml_running,
-        )
+
+    st.button(
+        "Run Machine Learning",
+        type="primary",
+        on_click=lambda: st.session_state.update(ml_running=True)
+        if not st.session_state.ml_running
+        else None,
+        disabled= not required_inputs_uploaded,
+    )
 
     if st.session_state.ml_running:
         with st.spinner("Running machine learning ...", show_time=True):
@@ -118,6 +117,8 @@ def st_machine_learning_section(designs_dir: Path, design_files):
             st.session_state.ml_running = False
             st.success("Machine learning completed successfully.")
 
+    # Use Existing Classic run for comparison
+    st.subheader("Use Existing Runs")
     designs_run_dir = Path("designs") / ml_design_option / "runs"
     if not os.path.exists(designs_run_dir):
         os.makedirs(designs_run_dir)

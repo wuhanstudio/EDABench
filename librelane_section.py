@@ -7,7 +7,7 @@ from workflow import librelane_design_config, st_display_gds, st_run_librelane
 
 
 def st_librelane_section(designs_dir: Path, design_files):
-    st.subheader("Part 2: LibreLane Flow")
+
     design_option = st.selectbox(
         "Choose a design:",
         design_files,
