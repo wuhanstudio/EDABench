@@ -24,7 +24,7 @@
         "flow": "Classic",
         "substituting_steps": {
             "+OpenROAD.GlobalRouting": "OpenROAD.ExportCongestionMap",
-            "+OpenROAD.ExportCongestionMap": "OpenROAD.ExportGroundTruth"
+            "+Misc.ReportManufacturability": "OpenROAD.ExportGroundTruth"
         }
     }
 }
