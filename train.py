@@ -1,4 +1,5 @@
 import os
+import csv
 import argparse
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -41,6 +42,8 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
     logger.info('Start training')
     train_losses = []
     valid_losses = []
+    train_ssim_losses = []
+    valid_bce_losses = []
     best_test_Loss = 99999999999999
     best_train_Loss = 99999999999999
 
@@ -49,6 +52,7 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
 
         # Training
         t = 0
+        t_ssim = 0
         n1 = 0
 
         for batch_idx, (features, labels) in tqdm(enumerate(train_loader), total=len(train_loader), desc='Train'):
@@ -70,67 +74,90 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
                 train_loss.backward()
                 optimizer.step()
 
+            # also track the SSIM-based metric so it's comparable to validation
+            with torch.no_grad():
+                train_ssim_loss = 1.0 - ssim(model.sigmoid(pred.detach()).float(), labels.float())
+
             t += train_loss.item()
+            t_ssim += train_ssim_loss.item()
             n1 += 1
+
         train_losses.append(t/n1)
+        train_ssim_losses.append(t_ssim/n1)
 
         # Evaluation
         model.eval()
         v = 0
+        v_bce = 0
         n2 = 0
         for batch_idx, (features, labels) in tqdm(enumerate(test_loader), total=len(test_loader), desc='Test'):
             features = features.to(device=device)
             labels = labels.to(device=device)
 
-            if use_amp:
-                with torch.amp.autocast('cuda'):
+            with torch.no_grad():
+                if use_amp:
+                    with torch.amp.autocast('cuda'):
+                        pred = model(features)
+                        val_bce_loss = criterion(pred, labels) * 1000
+                        pred = model.sigmoid(pred)
+                        test_loss = 1.0 - ssim(pred.float(), labels.float())
+                else:
                     pred = model(features)
+                    val_bce_loss = criterion(pred, labels) * 1000
                     pred = model.sigmoid(pred)
                     test_loss = 1.0 - ssim(pred.float(), labels.float())
-            else:
-                pred = model(features)
-                pred = model.sigmoid(pred)
-                test_loss = 1.0 - ssim(pred.float(), labels.float())
 
             v += test_loss.item()
+            v_bce += val_bce_loss.item()
             n2 += 1
-        valid_losses.append(v/n2)
 
+        valid_losses.append(v/n2)
+        valid_bce_losses.append(v_bce/n2)
 
         logger.info("\n")
-        logger.info(f'Epoch {e}: Train Loss: {t/n1/1000}  | Test Loss: {v/n2}')
+        logger.info(f'Epoch {e}: Train Loss: {t/n1}  | Test Loss: {v_bce/n2}')
 
         if t/n1 < best_train_Loss:
-            logger.info(f'Best Epoch {e}: Train Loss: {t/n1/1000}')
+            logger.info(f'Best Epoch {e}: Train Loss: {t/n1}')
             torch.save(model.state_dict(), f'{weight_savepath}/congestion_best_train_weights.pth')
             best_train_Loss = t/n1
 
-        if v/n2 < best_test_Loss:
-            logger.info(f'Best Epoch {e}: Test Loss: {v/n2}')
+        if v_bce/n2 < best_test_Loss:
+            logger.info(f'Best Epoch {e}: Test Loss: {v_bce/n2}')
             torch.save(model.state_dict(), f'{weight_savepath}/congestion_best_test_weights.pth')
-            best_test_Loss = v/n2
+            best_test_Loss = v_bce/n2
 
+        # rewritten every epoch so progress survives interruption
+        with open(f"{fig_savepath}/losses.csv", "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["epoch", "train_bce_loss", "val_bce_loss", "train_ssim_loss", "val_ssim_loss"])
+            for epoch_idx, (tr, va, tr_s, va_s) in enumerate(zip(train_losses, valid_bce_losses, train_ssim_losses, valid_losses)):
+                writer.writerow([epoch_idx, tr, va, tr_s, va_s])
+
+        # BCE-based loss: same metric for train and val
         fig = plt.figure()
         epochnum = list(range(0,len(train_losses)))
-        plt.plot(epochnum, train_losses, color='black', linewidth=1)
+        plt.plot(epochnum, train_losses, color='black', linewidth=1, label='Train')
+        plt.plot(epochnum, valid_bce_losses, color='red', linewidth=1, label='Val')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
         plt.xlim(0, len(train_losses))
-        plt.legend("Train", loc='best',fontsize=16)
-        plt.title("Train Loss")
+        plt.legend(loc='best', fontsize=16)
+        plt.title("BCE Loss")
         plt.grid(linestyle=':')
         plt.savefig(f"{fig_savepath}/train_losses.png")
         plt.close(fig)
 
+        # SSIM-based loss: same metric for train and val
         fig = plt.figure()
         epochnum = list(range(0,len(train_losses)))
-        # plt.plot(epochnum, train_losses, color='black', linewidth=1)
-        plt.plot(epochnum, valid_losses, color='red', linewidth=1)
+        plt.plot(epochnum, train_ssim_losses, color='black', linewidth=1, label='Train')
+        plt.plot(epochnum, valid_losses, color='red', linewidth=1, label='Val')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
         plt.xlim(0, len(train_losses))
-        plt.legend(("Val"), loc='best',fontsize=16)
-        plt.title("Val Loss")
+        plt.legend(loc='best', fontsize=16)
+        plt.title("SSIM Loss")
         plt.grid(linestyle=':')
         plt.savefig(f"{fig_savepath}/val_losses.png")
         plt.close(fig)
