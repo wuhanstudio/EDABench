@@ -1,14 +1,12 @@
 import os
 import csv
-import functools
 import argparse
+from math import cos, pi
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from loguru import logger
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from pytorch_msssim import SSIM
@@ -20,64 +18,68 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 use_amp = torch.cuda.is_available()
 
 
-def reduce_loss(loss, reduction):
-    reduction_enum = F._Reduction.get_enum(reduction)
-    if reduction_enum == 0:
-        return loss
-    elif reduction_enum == 1:
-        return loss.mean()
-    else:
-        return loss.sum()
-
-
-def mask_reduce_loss(loss, weight=None, reduction='mean', sample_wise=False):
-    if weight is not None:
-        assert weight.dim() == loss.dim()
-        assert weight.size(1) == 1 or weight.size(1) == loss.size(1)
-        loss = loss * weight
-
-    if weight is None or reduction == 'sum':
-        loss = reduce_loss(loss, reduction)
-    elif reduction == 'mean':
-        if weight.size(1) == 1:
-            weight = weight.expand_as(loss)
-        eps = 1e-12
-        if sample_wise:
-            weight = weight.sum(dim=[1, 2, 3], keepdim=True)
-            loss = (loss / (weight + eps)).sum() / weight.size(0)
-        else:
-            loss = loss.sum() / (weight.sum() + eps)
-    return loss
-
-
-def masked_loss(loss_func):
-    @functools.wraps(loss_func)
-    def wrapper(pred, target, weight=None, reduction='mean', sample_wise=False, **kwargs):
-        loss = loss_func(pred, target, **kwargs)
-        loss = mask_reduce_loss(loss, weight, reduction, sample_wise)
-        return loss
-    return wrapper
-
-
-@masked_loss
-def mse_loss(pred, target):
-    return F.mse_loss(pred, target, reduction='none')
-
-
-class MSELoss(nn.Module):
-    def __init__(self, loss_weight=100.0, reduction='mean', sample_wise=False):
+class CosineRestartLr(object):
+    def __init__(self,
+                 base_lr,
+                 periods,
+                 restart_weights=[1],
+                 min_lr=None,
+                 min_lr_ratio=None):
+        self.periods = periods
+        self.min_lr = min_lr
+        self.min_lr_ratio = min_lr_ratio
+        self.restart_weights = restart_weights
         super().__init__()
-        self.loss_weight = loss_weight
-        self.reduction = reduction
-        self.sample_wise = sample_wise
 
-    def forward(self, pred, target, weight=None, **kwargs):
-        return self.loss_weight * mse_loss(
-            pred,
-            target,
-            weight,
-            reduction=self.reduction,
-            sample_wise=self.sample_wise)
+        self.cumulative_periods = [
+            sum(self.periods[0:i + 1]) for i in range(0, len(self.periods))
+        ]
+
+        self.base_lr = base_lr
+
+    def annealing_cos(self, start: float,
+                       end: float,
+                       factor: float,
+                       weight: float = 1.) -> float:
+        cos_out = cos(pi * factor) + 1
+        return end + 0.5 * weight * (start - end) * cos_out
+
+    def get_position_from_periods(self, iteration: int, cumulative_periods):
+        for i, period in enumerate(cumulative_periods):
+            if iteration < period:
+                return i
+        raise ValueError(f'Current iteration {iteration} exceeds '
+                          f'cumulative_periods {cumulative_periods}')
+
+    def get_lr(self, iter_num, base_lr: float):
+        target_lr = self.min_lr  # type:ignore
+
+        idx = self.get_position_from_periods(iter_num, self.cumulative_periods)
+        current_weight = self.restart_weights[idx]
+        nearest_restart = 0 if idx == 0 else self.cumulative_periods[idx - 1]
+        current_periods = self.periods[idx]
+
+        alpha = min((iter_num - nearest_restart) / current_periods, 1)
+        return self.annealing_cos(base_lr, target_lr, alpha, current_weight)
+
+    def _set_lr(self, optimizer, lr_groups):
+        if isinstance(optimizer, dict):
+            for k, optim in optimizer.items():
+                for param_group, lr in zip(optim.param_groups, lr_groups[k]):
+                    param_group['lr'] = lr
+        else:
+            for param_group, lr in zip(optimizer.param_groups,
+                                        lr_groups):
+                param_group['lr'] = lr
+
+    def get_regular_lr(self, iter_num):
+        return [self.get_lr(iter_num, _base_lr) for _base_lr in self.base_lr]  # iters
+
+    def set_init_lr(self, optimizer):
+        for group in optimizer.param_groups:  # type: ignore
+            group.setdefault('initial_lr', group['lr'])
+            self.base_lr = [group['initial_lr'] for group in optimizer.param_groups  # type: ignore
+        ]
 
 def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
 
@@ -96,9 +98,15 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
 
     #criterion
     ssim = SSIM(data_range=1, size_average=True, channel=1)
-    criterion = MSELoss()
+    criterion = torch.nn.BCEWithLogitsLoss()
     #optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0)
+
+    # lr scheduler: cosine annealing over the full training run
+    max_iters = num_epochs * len(train_loader)
+    cosine_lr = CosineRestartLr(lr, [max_iters], [1], min_lr=1e-7)
+    cosine_lr.set_init_lr(optimizer)
+    iter_num = 0
 
     scaler = torch.amp.GradScaler('cuda') if use_amp else None
 
@@ -106,7 +114,7 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
     train_losses = []
     valid_losses = []
     train_ssim_losses = []
-    valid_mse_losses = []
+    valid_bce_losses = []
     best_test_Loss = 99999999999999
     best_train_Loss = 99999999999999
 
@@ -122,17 +130,21 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
             features = features.to(device=device)
             labels = labels.to(device=device)
 
+            regular_lr = cosine_lr.get_regular_lr(iter_num)
+            cosine_lr._set_lr(optimizer, regular_lr)
+            iter_num += 1
+
             if use_amp:
                 with torch.amp.autocast('cuda'):
                     pred = model(features)
-                    train_loss = criterion(model.sigmoid(pred), labels)
+                    train_loss = criterion(pred, labels) * 1000
                 optimizer.zero_grad()
                 scaler.scale(train_loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 pred = model(features)
-                train_loss = criterion(model.sigmoid(pred), labels)
+                train_loss = criterion(pred, labels) * 1000
                 optimizer.zero_grad()
                 train_loss.backward()
                 optimizer.step()
@@ -151,7 +163,7 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
         # Evaluation
         model.eval()
         v = 0
-        v_mse = 0
+        v_bce = 0
         n2 = 0
         for batch_idx, (features, labels) in tqdm(enumerate(test_loader), total=len(test_loader), desc='Test'):
             features = features.to(device=device)
@@ -161,52 +173,52 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
                 if use_amp:
                     with torch.amp.autocast('cuda'):
                         pred = model(features)
+                        val_bce_loss = criterion(pred, labels) * 1000
                         pred = model.sigmoid(pred)
-                        val_mse_loss = criterion(pred, labels)
                         test_loss = 1.0 - ssim(pred.float(), labels.float())
                 else:
                     pred = model(features)
+                    val_bce_loss = criterion(pred, labels) * 1000
                     pred = model.sigmoid(pred)
-                    val_mse_loss = criterion(pred, labels)
                     test_loss = 1.0 - ssim(pred.float(), labels.float())
 
             v += test_loss.item()
-            v_mse += val_mse_loss.item()
+            v_bce += val_bce_loss.item()
             n2 += 1
 
         valid_losses.append(v/n2)
-        valid_mse_losses.append(v_mse/n2)
+        valid_bce_losses.append(v_bce/n2)
 
         logger.info("\n")
-        logger.info(f'Epoch {e}: Train Loss: {t/n1}  | Test Loss: {v_mse/n2}')
+        logger.info(f'Epoch {e}: Train Loss: {t/n1/1000}  | Test Loss: {v_bce/n2}  | LR: {optimizer.param_groups[0]["lr"]:.6g}')
 
         if t/n1 < best_train_Loss:
             logger.info(f'Best Epoch {e}: Train Loss: {t/n1}')
             torch.save(model.state_dict(), f'{weight_savepath}/congestion_best_train_weights.pth')
             best_train_Loss = t/n1
 
-        if v_mse/n2 < best_test_Loss:
-            logger.info(f'Best Epoch {e}: Test Loss: {v_mse/n2}')
+        if v_bce/n2 < best_test_Loss:
+            logger.info(f'Best Epoch {e}: Test Loss: {v_bce/n2}')
             torch.save(model.state_dict(), f'{weight_savepath}/congestion_best_test_weights.pth')
-            best_test_Loss = v_mse/n2
+            best_test_Loss = v_bce/n2
 
         # rewritten every epoch so progress survives interruption
         with open(f"{fig_savepath}/losses.csv", "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["epoch", "train_mse_loss", "val_mse_loss", "train_ssim_loss", "val_ssim_loss"])
-            for epoch_idx, (tr, va, tr_s, va_s) in enumerate(zip(train_losses, valid_mse_losses, train_ssim_losses, valid_losses)):
+            writer.writerow(["epoch", "train_bce_loss", "val_bce_loss", "train_ssim_loss", "val_ssim_loss"])
+            for epoch_idx, (tr, va, tr_s, va_s) in enumerate(zip(train_losses, valid_bce_losses, train_ssim_losses, valid_losses)):
                 writer.writerow([epoch_idx, tr, va, tr_s, va_s])
 
-        # MSE-based loss: same metric for train and val
+        # BCE-based loss: same metric for train and val
         fig = plt.figure()
         epochnum = list(range(0,len(train_losses)))
         plt.plot(epochnum, train_losses, color='black', linewidth=1, label='Train')
-        plt.plot(epochnum, valid_mse_losses, color='red', linewidth=1, label='Val')
+        plt.plot(epochnum, valid_bce_losses, color='red', linewidth=1, label='Val')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
         plt.xlim(0, len(train_losses))
         plt.legend(loc='best', fontsize=16)
-        plt.title("MSE Loss")
+        plt.title("BCE Loss")
         plt.grid(linestyle=':')
         plt.savefig(f"{fig_savepath}/train_losses.png")
         plt.close(fig)
@@ -225,9 +237,7 @@ def train(rootpath,batch_size,num_epochs,lr,fig_savepath,weight_savepath):
         plt.savefig(f"{fig_savepath}/val_losses.png")
         plt.close(fig)
 
-
         fig, ax = plt.subplots(1, 2, figsize=(9, 4.5), tight_layout=True)
-        pred = model.sigmoid(pred)
         ax[0].imshow(pred[0,0].detach().cpu())
         ax[1].imshow(labels[0,0].cpu())
         ax[0].title.set_text('Pred')
@@ -239,10 +249,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Librelane Congestion Model Training")
     parser.add_argument("--root_path", default="./datasets/", type=str, help='The path of the data file')
     parser.add_argument("--batch_size", default=8, type=int, help='The batch size')
-    parser.add_argument("--num_epochs", default=100, type=int, help='The training epochs')
+    parser.add_argument("--num_epochs", default=1000, type=int, help='The training epochs')
     parser.add_argument("--weight_path", default="./models/model_weight", type=str, help='The path to save the model weight')
     parser.add_argument("--fig_path", default="./figures", type=str, help='The path of the figure file')
-    parser.add_argument("--learning_rate", default=0.001, type=float, help='learning rate [0,1]')
+    parser.add_argument("--learning_rate", default=0.0001, type=float, help='learning rate [0,1]')
     args = parser.parse_args()
     return args
 
